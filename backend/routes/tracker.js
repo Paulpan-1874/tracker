@@ -1,7 +1,9 @@
 const express = require('express');
 const router = express.Router();
+const prisma = require('../prisma/client');
 
-router.post('/location', (req, res) => {
+// POST /api/tracker/location - 接收并保存定位数据
+router.post('/location', async (req, res) => {
   try {
     let rawData;
     
@@ -56,13 +58,23 @@ router.post('/location', (req, res) => {
     
     console.log('Parsed location data:', locationData);
     
-    // 这里可以添加数据库存储逻辑
-    // saveToDatabase(locationData);
+    // 保存到数据库
+    const savedLocation = await prisma.location.create({
+      data: {
+        imei: locationData.imei,
+        longitude: locationData.longitude,
+        height: locationData.height,
+        latitude: locationData.latitude,
+        timestamp: new Date(locationData.timestamp)
+      }
+    });
+    
+    console.log('Location saved to database:', savedLocation);
     
     res.json({
       success: true,
-      message: 'Location data received successfully',
-      data: locationData
+      message: 'Location data received and saved successfully',
+      data: savedLocation
     });
     
   } catch (error) {
@@ -70,6 +82,108 @@ router.post('/location', (req, res) => {
     res.status(500).json({
       success: false,
       message: 'Error processing location data',
+      error: error.message
+    });
+  }
+});
+
+// GET /api/tracker/locations - 获取所有定位记录
+router.get('/locations', async (req, res) => {
+  try {
+    const { imei, limit = 100 } = req.query;
+    
+    const where = imei ? { imei } : {};
+    
+    const locations = await prisma.location.findMany({
+      where,
+      orderBy: { timestamp: 'desc' },
+      take: parseInt(limit)
+    });
+    
+    res.json({
+      success: true,
+      count: locations.length,
+      data: locations
+    });
+    
+  } catch (error) {
+    console.error('Error fetching locations:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Error fetching locations',
+      error: error.message
+    });
+  }
+});
+
+// GET /api/tracker/latest/:imei - 获取单个设备的最新位置
+router.get('/latest/:imei', async (req, res) => {
+  try {
+    const { imei } = req.params;
+    
+    const latestLocation = await prisma.location.findFirst({
+      where: { imei },
+      orderBy: { timestamp: 'desc' }
+    });
+    
+    if (!latestLocation) {
+      return res.status(404).json({
+        success: false,
+        message: 'No location data found for this device'
+      });
+    }
+    
+    res.json({
+      success: true,
+      data: latestLocation
+    });
+    
+  } catch (error) {
+    console.error('Error fetching latest location:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Error fetching latest location',
+      error: error.message
+    });
+  }
+});
+
+// GET /api/tracker/stats/:imei - 获取设备统计信息
+router.get('/stats/:imei', async (req, res) => {
+  try {
+    const { imei } = req.params;
+    
+    const totalLocations = await prisma.location.count({
+      where: { imei }
+    });
+    
+    const latestLocation = await prisma.location.findFirst({
+      where: { imei },
+      orderBy: { timestamp: 'desc' }
+    });
+    
+    const oldestLocation = await prisma.location.findFirst({
+      where: { imei },
+      orderBy: { timestamp: 'asc' }
+    });
+    
+    res.json({
+      success: true,
+      data: {
+        imei,
+        totalLocations,
+        latestLocation,
+        oldestLocation,
+        firstRecordTime: oldestLocation?.timestamp,
+        lastRecordTime: latestLocation?.timestamp
+      }
+    });
+    
+  } catch (error) {
+    console.error('Error fetching stats:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Error fetching stats',
       error: error.message
     });
   }
